@@ -10,13 +10,7 @@ void printBig(BigInt big){
     printf("\n");
 }
 int main(){
-    BigInt product=1;
-    for(int i=0;i<100;i++){
-        product*=BigInt(i+1);
-        printBig(product);
-    }
-    for(int i=0;i<3;i++){
-        product/=BigInt(i+1);
-        printBig(product);
-    }
+    BigInt i=BigInt(1)<<64;
+    printf("\n");
+    printBig(i);
 }

@@ -93,13 +93,18 @@ public:
     friend bool operator> (const BigInt&a,const BigInt&b){return (a-b).sign()>0;}
     friend bool operator!=(const BigInt&a,const BigInt&b){return (a-b).sign()!=0;}
     BigInt operator>>(size_t shift)const{
+        if(!shift){return (*this);}
         if(!dat){
             if(shift<digits<size_t>){return BigInt((len>>shift)|((-signBit(len))<<(digits<size_t>-shift)));}
             return BigInt(0);
         }
-
         size_t bit_shift=shift%digits<umax>;
         size_t word_shift=shift/digits<umax>;
+        if(!bit_shift){
+            Data*out=allocData(len-word_shift);
+            for(size_t i=word_shift;i<len;i++){out->data[i-word_shift]=dat->data[i];}
+            return BigInt(out,len-word_shift);
+        }
         Data*out=allocData(len-word_shift);
         for(size_t i=word_shift;i<len-1;i++){
             out->data[i-word_shift]=(dat->data[i]>>bit_shift)|(dat->data[i+1]<<(digits<umax>-bit_shift));
@@ -110,6 +115,7 @@ public:
     BigInt&operator>>=(size_t shift){(*this)=(*this)>>shift;return *this;}
     BigInt&operator<<=(size_t shift){(*this)=(*this)<<shift;return *this;}
     BigInt operator<<(size_t shift)const{
+        if(!shift){return (*this);}
         if(!dat){
             size_t bit_shift=shift%digits<size_t>;
             if(shift<digits<size_t>&&(-signBit(len))>>(digits<size_t>-bit_shift-1)==len>>(digits<size_t>-bit_shift-1)){
@@ -117,6 +123,12 @@ public:
             }
             bit_shift=shift%digits<umax>;
             size_t word_shift=shift/digits<umax>;
+            if(!bit_shift){
+                Data*out=allocData(1+word_shift);
+                for(size_t i=0;i<word_shift;i++){out->data[i]=0;}
+                out->data[word_shift]=signExtend(len);
+                return BigInt(out,1+word_shift);
+            }
             umax lo=signExtend(len)<<bit_shift;
             umax hi=((-(umax)signBit(len))<<bit_shift)|(len>>(digits<umax>-bit_shift));
             bool needs_bigger=-signBit(lo)!=hi;
@@ -128,6 +140,12 @@ public:
         }
         size_t bit_shift=shift%digits<umax>;
         size_t word_shift=shift/digits<umax>;
+        if(!bit_shift){
+            Data*out=allocData(len+word_shift);
+            for(size_t i=0;i<word_shift;i++){out->data[i]=0;}
+            for(size_t i=0;i<len;i++){out->data[i+word_shift]=dat->data[i];}
+            return BigInt(out,len+word_shift);
+        }
         umax ext=((-signBit(dat->data[len-1]))<<bit_shift)|(dat->data[len-1]>>(digits<umax>-bit_shift));
         bool needs_bigger=-signBit(dat->data[len-1]<<bit_shift)!=ext;
         Data*out=allocData(len+needs_bigger+word_shift);
@@ -157,7 +175,6 @@ public:
         if(!that.dat){
             umax ext=signExtend(that.len);
             bit_and(dat->data,len,&ext,1,dat->data);
-            len++;
         }else{
             size_t olen=len>that.len?len:that.len;
             dat=allocData(dat,olen);
@@ -182,12 +199,10 @@ public:
         return BigInt(out,olen).shrink();
     }
     BigInt&operator|=(const BigInt&that){
-        printf("%zd %p|=%zd %p\n",len,(void*)dat,that.len,(void*)that.dat);
         if(!dat){return (*this)=(*this)|that;}
         if(!that.dat){
             umax ext=signExtend(that.len);
             bit_or(dat->data,len,&ext,1,dat->data);
-            len++;
         }else{
             size_t olen=len>that.len?len:that.len;
             dat=allocData(dat,olen);
@@ -216,7 +231,6 @@ public:
         if(!that.dat){
             umax ext=signExtend(that.len);
             bit_xor(dat->data,len,&ext,1,dat->data);
-            len++;
         }else{
             size_t olen=len>that.len?len:that.len;
             dat=allocData(dat,olen);
@@ -372,17 +386,10 @@ public:
         }
         q=r=0;
         for(size_t i=(a.dat?a.len:1)*digits<umax>;i--;){
-            //printf("r=%zd %p\n",r.len,(void*)r.dat);
             r=r<<1|((a>>i)&1);
-            //printf("r=%zd %p\n",r.len,(void*)r.dat);
-            if(r>=b){
-                r-=b;
-                q|=(BigInt(1)<<i);
-            }
-            //printf("(1<<i)=%zd %p\n",r.len,(void*)r.dat);
-            //printf("q=%zd %p\n",q.len,(void*)q.dat);
+            q<<=1;
+            if(r>=b){r-=b;q|=BigInt(1);}
         }
-        
     }
     friend BigInt operator/(const BigInt&a,const BigInt&b){BigInt q,r;divmod(a,b,q,r);return q;}
     friend BigInt operator%(const BigInt&a,const BigInt&b){BigInt q,r;divmod(a,b,q,r);return r;}
