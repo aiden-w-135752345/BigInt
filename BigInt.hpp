@@ -8,9 +8,8 @@
 #include <memory>
 class BigInt{
     typedef uintmax_t umax;
-    static auto alloc(size_t len){
-        return std::shared_ptr<umax>(new umax[len-1],std::default_delete<umax[]>());
-    }
+    typedef std::make_signed<size_t>::type signed_size_t;
+    static std::shared_ptr<umax> alloc(size_t len){return{new umax[len-1],std::default_delete<umax[]>()};}
     std::shared_ptr<umax> dat;
     size_t len;
     
@@ -47,11 +46,9 @@ class BigInt{
         }catch(std::bad_alloc){}
         return *this;
     }
-    struct Signed{};
-    BigInt(size_t value,Signed):dat(alloc(1)),len(1){dat.get()[0]=std::make_signed_t<size_t>(value);}
     BigInt(std::shared_ptr<umax>&&data,size_t length):dat(data),len(length){}
 public:
-    BigInt(std::make_signed_t<size_t> value=0):dat(alloc(1)),len(1){dat.get()[0]=value;}
+    BigInt(signed_size_t value=0):dat(alloc(1)),len(1){dat.get()[0]=value;}
     int sign()const{return signBit(dat.get()[len-1])?-1:1;}
     size_t popcnt(){
         size_t total=0;
@@ -98,7 +95,7 @@ public:
     BigInt operator>>(size_t shift)const{
         if(!shift){return *this;}
         size_t bit_shift=shift%bits,word_shift=shift/bits;
-        if(len<=word_shift){return BigInt(-signBit(dat.get()[len-1]),Signed{});}
+        if(len<=word_shift){return BigInt(-(signed_size_t)signBit(dat.get()[len-1]));}
         if(!bit_shift){
             auto out=alloc(len-word_shift);
             for(size_t i=word_shift;i<len;i++){out.get()[i-word_shift]=dat.get()[i];}

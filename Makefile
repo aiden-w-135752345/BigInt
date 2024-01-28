@@ -1,7 +1,7 @@
 all: BigInt.o test.out asan.out
 	size -t BigInt.o test.o
 
-CFLAGS = -Wall -pedantic -Wextra -Werror -std=c++14
+CFLAGS = -Wall -Wextra -Werror -Wpedantic -std=c++11
 
 BigInt.o: BigInt.cpp BigInt.hpp ../SmartPtr/SmartPtr.hpp
 	g++ $(CFLAGS) -Os -s -c BigInt.cpp -o $@
