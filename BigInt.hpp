@@ -5,85 +5,64 @@
 #include <new>
 #include <cmath>
 #include <utility>
+#include <memory>
 class BigInt{
-    struct Data{size_t refcount;uintmax_t data[1];};
-    Data* dat;
-    size_t len;
-    typedef signed char schar;
-    typedef unsigned char uchar;
     typedef uintmax_t umax;
-    static Data*allocData(size_t len){
-        Data*dat=(Data*)malloc(sizeof(Data)+(len-1)*sizeof(umax));
-        if(!dat){throw std::bad_alloc();}
-        dat->refcount=1;
-        return dat;
+    static auto alloc(size_t len){
+        return std::shared_ptr<umax>(new umax[len-1],std::default_delete<umax[]>());
     }
-    static Data*allocData(Data*orig,size_t len){
-        Data*dat=(Data*)realloc(orig,sizeof(Data)+(len-1)*sizeof(umax));
-        if(!dat){throw std::bad_alloc();}
-        return dat;
-    }
-    template<class T>constexpr static auto digits = std::numeric_limits<T>::digits;
-/*    template<class T>typename std::make_signed_t<T> to_signed(T value) {
-        typedef std::make_signed_t<T> signed_T;
-        typedef std::numeric_limits<signed_T> limits;
-        return value<=limits::max()?(signed_T)value:signed_T(value-limits::min())+limits::min();
-    }*/
-    template<class T>static T signBit(T value){return value>>(digits<T>-1);}
-    template<class T>static umax signExtend(T value){return value|((-(umax)signBit(value))<<digits<T>);}
-    static umax signExtend(umax value){return value;}
+    std::shared_ptr<umax> dat;
+    size_t len;
     
-    template<class T>static void pack(T lo,T hi,umax&low,umax&high){
-        if(digits<T>*2 < digits<umax>){
-            low=lo|(((umax)hi)<<digits<T>)|(((umax)high)<<(2*digits<T>));
-            high=-(umax)signBit(hi);
-        }else{
-            low=lo|(((umax)hi)<<digits<T>);
-            high=(hi>>(digits<umax>-digits<T>))|((-(umax)signBit(hi))<<(2*digits<T>-digits<umax>));
+
+    constexpr static auto bits = std::numeric_limits<umax>::digits;
+    static umax signBit(umax value){return value>>(bits-1);}
+    static size_t popcnt(umax value){
+        for(size_t i=1;i<bits;i<<=1){
+            umax mask=((umax)-1)/((((umax)1)<<i)+1);
+            value=(value&mask)+((value>>i)&mask);
         }
+        return value;
     }
-    static void pack(umax lo,umax hi,umax&low,umax&high){low=lo;high=hi;}
-    BigInt&shrink(){
-        while(len>1&&!(dat->data[len-1]+signBit(dat->data[len-2]))){len--;}
-        if(len==1&&dat->data[0]>>(digits<size_t>-1)==(-signBit(dat->data[0]))>>(digits<size_t>-1)){
-            len=(size_t)(dat->data[0]);free(dat);dat=nullptr;
-        }else{
-            Data*resized=(Data*)realloc(dat,sizeof(Data)+(len-1)*sizeof(umax));
-            if(resized){dat=resized;}
+    static size_t ctz(umax value){
+        size_t c=bits;
+        value&=-value;
+        if(value){c--;}
+        for(size_t i=bits/2;i;i>>=1){
+            if(value&(((umax)-1)/((((umax)1)<<i)+1))){c-=i;}
         }
+        return 0;
+    }
+    static size_t log2(umax value){
+        size_t r = 0;
+        for(size_t s=bits/2;s;s>>=1){if(value&(((((umax)1)<<s)-1)<<s)){value>>=s;r|=s;}}
+        return r;// floor(log2(value))
+    }
+    BigInt&shrink(){
+        while(len>1&&!(dat.get()[len-1]+signBit(dat.get()[len-2]))){len--;}
+        try{
+            auto resized=alloc(len);
+            for(umax i=0;i<len;i++){resized.get()[i]=dat.get()[i];}
+            dat=std::move(resized);
+        }catch(std::bad_alloc){}
         return *this;
     }
     struct Signed{};
-    BigInt(size_t val,Signed){dat=nullptr;len=val;}
-    BigInt(Data*data,size_t length):dat(data),len(length){}
-    BigInt(umax lo,umax hi){
-        if(-signBit(lo)!=hi){
-            dat=allocData(2);
-            dat->data[0]=lo;
-            dat->data[1]=hi;
-            len=2;
-        }else if(lo>>(digits<size_t>-1)!=(-signBit(lo))>>(digits<size_t>-1)){
-            dat=allocData(1);
-            dat->data[0]=lo;
-            len=1;
-        }else{dat=nullptr;len=lo;}
-    }
+    BigInt(size_t value,Signed):dat(alloc(1)),len(1){dat.get()[0]=std::make_signed_t<size_t>(value);}
+    BigInt(std::shared_ptr<umax>&&data,size_t length):dat(data),len(length){}
 public:
-    BigInt():dat(nullptr),len(0){}
-    BigInt(std::make_signed_t<size_t> val){dat=nullptr;len=val;}
-    BigInt(const BigInt&that):dat(that.dat),len(that.len){if(dat){dat->refcount++;}}
-    BigInt(BigInt&&that):BigInt(){swap(*this,that);}
-    BigInt&operator=(BigInt that){swap(*this,that);return *this;}
-    ~BigInt(){if(dat){if(0==--(dat->refcount))free(dat);}}
-    friend void swap(BigInt&a,BigInt&b){using std::swap;swap(a.dat,b.dat);swap(a.len,b.len);}
-    int sign()const{
-        if(!dat){
-            if(signBit(len)){return -1;}
-            return len?1:0;
-        }
-        if(signBit(dat->data[len-1])){return -1;}
-        for(size_t i=0;i<len;i++){if(dat->data[i]){return 1;}}
-        return 0;
+    BigInt(std::make_signed_t<size_t> value=0):dat(alloc(1)),len(1){dat.get()[0]=value;}
+    int sign()const{return signBit(dat.get()[len-1])?-1:1;}
+    size_t popcnt(){
+        size_t total=0;
+        for(size_t i=0;i<len;i++){total+=popcnt(dat.get()[i]);}
+        if(signBit(dat.get()[len-1])){return len*bits-total;}
+        return total;
+    }
+    size_t ctz(){
+        size_t i=0;
+        while(dat.get()[i]){i++;}
+        return i*bits+ctz(dat.get()[i]);
     }
     explicit operator bool() const{return sign();};
     friend bool operator< (const BigInt&a,const BigInt&b){return (a-b).sign()<0;}
@@ -92,262 +71,126 @@ public:
     friend bool operator>=(const BigInt&a,const BigInt&b){return (a-b).sign()>=0;}
     friend bool operator> (const BigInt&a,const BigInt&b){return (a-b).sign()>0;}
     friend bool operator!=(const BigInt&a,const BigInt&b){return (a-b).sign()!=0;}
+    
+    BigInt operator-()const{return (~*this).inc_dec(true,false);}
+    friend BigInt operator-(const BigInt&a,const BigInt&b){return a+-b;}
+    friend BigInt operator/(const BigInt&a,const BigInt&b){BigInt q=a,r;divmod(q,b,r);return q;}
+    friend BigInt operator%(const BigInt&a,const BigInt&b){BigInt q=a,r;divmod(q,b,r);return r;}
+    
+    BigInt&invert(){return*this=~*this;}
+    BigInt&operator++(){return *this=inc_dec(true,false);}
+    BigInt operator++(int){BigInt old=*this;operator++();return old;}
+    BigInt&operator--(){return *this=inc_dec(false,true);}
+    BigInt operator--(int){BigInt old=*this;operator--();return old;}
+    BigInt&negate(){return ++invert();}
+    
+    BigInt&operator>>=(size_t shift){return *this=(*this)>>shift;}
+    BigInt&operator<<=(size_t shift){return *this=(*this)<<shift;}
+    BigInt&operator&=(const BigInt&that){return *this=(*this)&that;}
+    BigInt&operator|=(const BigInt&that){return *this=(*this)|that;}
+    BigInt&operator^=(const BigInt&that){return *this=(*this)^that;}
+    BigInt&operator+=(const BigInt&that){return *this=(*this)+that;}
+    BigInt&operator-=(const BigInt&that){return *this=(*this)-that;}
+    BigInt&operator*=(const BigInt&that){return *this=(*this)*that;}
+    BigInt&operator/=(const BigInt&that){return *this=(*this)/that;}
+    BigInt&operator%=(const BigInt&that){return *this=(*this)%that;}
+    
     BigInt operator>>(size_t shift)const{
-        if(!shift){return (*this);}
-        if(!dat){
-            if(shift<digits<size_t>){return BigInt((len>>shift)|((-signBit(len))<<(digits<size_t>-shift)));}
-            return BigInt(0);
-        }
-        size_t bit_shift=shift%digits<umax>;
-        size_t word_shift=shift/digits<umax>;
+        if(!shift){return *this;}
+        size_t bit_shift=shift%bits,word_shift=shift/bits;
+        if(len<=word_shift){return BigInt(-signBit(dat.get()[len-1]),Signed{});}
         if(!bit_shift){
-            Data*out=allocData(len-word_shift);
-            for(size_t i=word_shift;i<len;i++){out->data[i-word_shift]=dat->data[i];}
-            return BigInt(out,len-word_shift);
+            auto out=alloc(len-word_shift);
+            for(size_t i=word_shift;i<len;i++){out.get()[i-word_shift]=dat.get()[i];}
+            return BigInt(std::move(out),len-word_shift);
+        }else{
+            umax ext=(dat.get()[len-1]>>bit_shift)|((-signBit(dat.get()[len-1]))<<(bits-bit_shift));
+            bool can_shrink=-signBit(dat.get()[len-1]<<(bits-bit_shift))==ext;
+            auto out=alloc(len-word_shift-can_shrink);
+            for(size_t i=word_shift;i<len-1;i++){
+                out.get()[i-word_shift]=(dat.get()[i]>>bit_shift)|(dat.get()[i+1]<<(bits-bit_shift));
+            }
+            if(!can_shrink){out.get()[len-1-word_shift]=ext;}
+            return BigInt(std::move(out),len-word_shift-can_shrink);
         }
-        Data*out=allocData(len-word_shift);
-        for(size_t i=word_shift;i<len-1;i++){
-            out->data[i-word_shift]=(dat->data[i]>>bit_shift)|(dat->data[i+1]<<(digits<umax>-bit_shift));
-        }
-        out->data[len-1-word_shift]=(dat->data[len-1]>>bit_shift)|((-signBit(dat->data[len-1]))<<(digits<umax>-bit_shift));
-        return BigInt(out,len-word_shift).shrink();
     }
-    BigInt&operator>>=(size_t shift){(*this)=(*this)>>shift;return *this;}
-    BigInt&operator<<=(size_t shift){(*this)=(*this)<<shift;return *this;}
     BigInt operator<<(size_t shift)const{
-        if(!shift){return (*this);}
-        if(!dat){
-            size_t bit_shift=shift%digits<size_t>;
-            if(shift<digits<size_t>&&(-signBit(len))>>(digits<size_t>-bit_shift-1)==len>>(digits<size_t>-bit_shift-1)){
-                return BigInt(len<<bit_shift);
-            }
-            bit_shift=shift%digits<umax>;
-            size_t word_shift=shift/digits<umax>;
-            if(!bit_shift){
-                Data*out=allocData(1+word_shift);
-                for(size_t i=0;i<word_shift;i++){out->data[i]=0;}
-                out->data[word_shift]=signExtend(len);
-                return BigInt(out,1+word_shift);
-            }
-            umax lo=signExtend(len)<<bit_shift;
-            umax hi=((-(umax)signBit(len))<<bit_shift)|(len>>(digits<umax>-bit_shift));
-            bool needs_bigger=-signBit(lo)!=hi;
-            Data*out=allocData(1+needs_bigger+word_shift);
-            for(size_t i=0;i<word_shift;i++){out->data[i]=0;}
-            out->data[word_shift]=lo;
-            if(needs_bigger){out->data[1+word_shift]=hi;}
-            return BigInt(out,1+needs_bigger+word_shift);
-        }
-        size_t bit_shift=shift%digits<umax>;
-        size_t word_shift=shift/digits<umax>;
+        if(!shift){return *this;}
+        size_t bit_shift=shift%bits,word_shift=shift/bits;
         if(!bit_shift){
-            Data*out=allocData(len+word_shift);
-            for(size_t i=0;i<word_shift;i++){out->data[i]=0;}
-            for(size_t i=0;i<len;i++){out->data[i+word_shift]=dat->data[i];}
-            return BigInt(out,len+word_shift);
+            auto out=alloc(len+word_shift);
+            for(size_t i=0;i<word_shift;i++){out.get()[i]=0;}
+            for(size_t i=0;i<len;i++){out.get()[i+word_shift]=dat.get()[i];}
+            return BigInt(std::move(out),len+word_shift);
         }
-        umax ext=((-signBit(dat->data[len-1]))<<bit_shift)|(dat->data[len-1]>>(digits<umax>-bit_shift));
-        bool needs_bigger=-signBit(dat->data[len-1]<<bit_shift)!=ext;
-        Data*out=allocData(len+needs_bigger+word_shift);
-        for(size_t i=0;i<word_shift;i++){out->data[i]=0;}
-        out->data[word_shift]=dat->data[0]<<bit_shift;
-        for(size_t i=1;i<len;i++){out->data[i+word_shift]=(dat->data[i]<<bit_shift)|(dat->data[i-1]>>(digits<umax>-bit_shift));}
-        if(needs_bigger){out->data[len+word_shift]=ext;}
-        return BigInt(out,len+needs_bigger+word_shift);
+        umax ext=((-signBit(dat.get()[len-1]))<<bit_shift)|(dat.get()[len-1]>>(bits-bit_shift));
+        bool needs_bigger=-signBit(dat.get()[len-1]<<bit_shift)!=ext;
+        auto out=alloc(len+needs_bigger+word_shift);
+        for(size_t i=0;i<word_shift;i++){out.get()[i]=0;}
+        out.get()[word_shift]=dat.get()[0]<<bit_shift;
+        for(size_t i=1;i<len;i++){out.get()[i+word_shift]=(dat.get()[i]<<bit_shift)|(dat.get()[i-1]>>(bits-bit_shift));}
+        if(needs_bigger){out.get()[len+word_shift]=ext;}
+        return BigInt(std::move(out),len+needs_bigger+word_shift);
     }
 private:
     static void bit_and(const umax*adat,size_t alen,const umax*bdat,size_t blen,umax*out);
 public:
     friend BigInt operator&(const BigInt&a,const BigInt&b){
-        if(!(a.dat||b.dat)){return BigInt(a.len&b.len,Signed{});}
-        umax aext=signExtend(a.len),bext=signExtend(b.len);
-        size_t alen=a.dat?a.len:1,blen=b.dat?b.len:1;
-        umax*adat=a.dat?a.dat->data:&aext;
-        umax*bdat=b.dat?b.dat->data:&bext;
-        
-        size_t olen=alen>blen?alen:blen;
-        Data*out=allocData(olen);
-        bit_and(adat,alen,bdat,blen,out->data);
-        return BigInt(out,olen).shrink();
-    }
-    BigInt&operator&=(const BigInt&that){
-        if(!dat){return (*this)=(*this)&that;}
-        if(!that.dat){
-            umax ext=signExtend(that.len);
-            bit_and(dat->data,len,&ext,1,dat->data);
-        }else{
-            size_t olen=len>that.len?len:that.len;
-            dat=allocData(dat,olen);
-            bit_and(dat->data,len,that.dat->data,that.len,dat->data);
-            len=olen;
-        }
-        return *this;
+        size_t olen=a.len>b.len?a.len:b.len;
+        auto out=alloc(olen);
+        bit_and(a.dat.get(),a.len,b.dat.get(),b.len,out.get());
+        return BigInt(std::move(out),olen).shrink();
     }
 private:
     static void bit_or(const umax*adat,size_t alen,const umax*bdat,size_t blen,umax*out);
 public:
     friend BigInt operator|(const BigInt&a,const BigInt&b){
-        if(!(a.dat||b.dat)){return BigInt(a.len|b.len,Signed{});}
-        umax aext=signExtend(a.len),bext=signExtend(b.len);
-        size_t alen=a.dat?a.len:1,blen=b.dat?b.len:1;
-        umax*adat=a.dat?a.dat->data:&aext;
-        umax*bdat=b.dat?b.dat->data:&bext;
-        
-        size_t olen=alen>blen?alen:blen;
-        Data*out=allocData(olen);
-        bit_or(adat,alen,bdat,blen,out->data);
-        return BigInt(out,olen).shrink();
-    }
-    BigInt&operator|=(const BigInt&that){
-        if(!dat){return (*this)=(*this)|that;}
-        if(!that.dat){
-            umax ext=signExtend(that.len);
-            bit_or(dat->data,len,&ext,1,dat->data);
-        }else{
-            size_t olen=len>that.len?len:that.len;
-            dat=allocData(dat,olen);
-            bit_or(dat->data,len,that.dat->data,that.len,dat->data);
-            len=olen;
-        }
-        return *this;
+        size_t olen=a.len>b.len?a.len:b.len;
+        auto out=alloc(olen);
+        bit_or(a.dat.get(),a.len,b.dat.get(),b.len,out.get());
+        return BigInt(std::move(out),olen).shrink();
     }
 private:
     static void bit_xor(const umax*adat,size_t alen,const umax*bdat,size_t blen,umax*out);
 public:
     friend BigInt operator^(const BigInt&a,const BigInt&b){
-        if(!(a.dat||b.dat)){return BigInt(a.len^b.len,Signed{});}
-        umax aext=signExtend(a.len),bext=signExtend(b.len);
-        size_t alen=a.dat?a.len:1,blen=b.dat?b.len:1;
-        umax*adat=a.dat?a.dat->data:&aext;
-        umax*bdat=b.dat?b.dat->data:&bext;
-        
-        size_t olen=alen>blen?alen:blen;
-        Data*out=allocData(olen);
-        bit_xor(adat,alen,bdat,blen,out->data);
-        return BigInt(out,olen).shrink();
-    }
-    BigInt&operator^=(const BigInt&that){
-        if(!dat){return (*this)=(*this)^that;}
-        if(!that.dat){
-            umax ext=signExtend(that.len);
-            bit_xor(dat->data,len,&ext,1,dat->data);
-        }else{
-            size_t olen=len>that.len?len:that.len;
-            dat=allocData(dat,olen);
-            bit_xor(dat->data,len,that.dat->data,that.len,dat->data);
-            len=olen;
-        }
-        return *this;
+        size_t olen=a.len>b.len?a.len:b.len;
+        auto out=alloc(olen);
+        bit_xor(a.dat.get(),a.len,b.dat.get(),b.len,out.get());
+        return BigInt(std::move(out),olen).shrink();
     }
     BigInt operator~()const{
-        if(!dat){return BigInt(~len,Signed{});}
-        Data*out=allocData(len);
-        for(size_t i=0;i<len;i++){out->data[i]=~dat->data[i];}
-        return BigInt(out,len);
-    }
-    BigInt& invert(){
-        if(dat){
-            for(size_t i=0;i<len;i++){dat->data[i]=~dat->data[i];}
-        }else{len=~len;}
-        return *this;
+        auto out=alloc(len);
+        for(size_t i=0;i<len;i++){out.get()[i]=~dat.get()[i];}
+        return BigInt(std::move(out),len);
     }
 private:
     static bool inc_dec(bool carry,bool borrow,const umax*in,umax*out,size_t len);
 public:
-    BigInt&operator++(){
-        if(!dat){
-            umax total=signExtend(len)+1;
-            (*this)=BigInt(total,(umax)(!total)-signBit(len));
-        }else{
-            dat=allocData(dat,len+1);
-            dat->data[len]=-(umax)inc_dec(true,false,dat->data,dat->data,len);
-            shrink();
-        }
-        return *this;
-    }
-    BigInt operator++(int){BigInt old=*this;operator++();return old;}
-    BigInt&operator--(){
-        if(!dat){
-            (*this)=BigInt(signExtend(len)-1,-(umax)(!len)-signBit(len));
-        }else{
-            dat=allocData(dat,len+1);
-            dat->data[len]=-(umax)inc_dec(false,true,dat->data,dat->data,len);
-            shrink();
-        }
-        return *this;
-    }
-    BigInt operator--(int){BigInt old=*this;operator--();return old;}
     BigInt inc_dec(bool carry,bool borrow)const{
         if(carry==borrow){return *this;}
-        if(!dat){
-            umax total=signExtend(len)+((umax)carry)-((umax)borrow);
-            return BigInt(total,(umax)(total<signExtend(len))-signBit(len)-(umax)(borrow));
-        }
-        Data*out=allocData(len+1);
-        out->data[len]=-(umax)inc_dec(carry,borrow,dat->data,out->data,len);
-        return BigInt(out,len+1).shrink();
+        auto out=alloc(len+1);
+        out.get()[len]=-(umax)inc_dec(carry,borrow,dat.get(),out.get(),len);
+        return BigInt(std::move(out),len+1).shrink();
     }
 private:
     static umax add(const umax*adat,size_t alen,const umax*bdat,size_t blen,umax*out);
 public:
     friend BigInt operator+(const BigInt&a,const BigInt&b){
-        if(!(a.dat||b.dat)){
-            size_t lo=a.len+b.len,hi=(size_t)(lo<a.len)-signBit(a.len)-signBit(b.len);
-            umax low,high;
-            pack(lo,hi,low,high);
-            return BigInt(low,high);
-        }
-        umax aext=signExtend(a.len),bext=signExtend(b.len);
-        size_t alen=a.dat?a.len:1,blen=b.dat?b.len:1;
-        umax*adat=a.dat?a.dat->data:&aext;
-        umax*bdat=b.dat?b.dat->data:&bext;
-        
-        size_t olen=(alen>blen?alen:blen)+1;
-        Data*out=allocData(olen);
-        out->data[olen-1]=add(adat,alen,bdat,blen,out->data);
-        return BigInt(out,olen).shrink();
+        size_t olen=(a.len>b.len?a.len:b.len)+1;
+        auto out=alloc(olen);
+        out.get()[olen-1]=add(a.dat.get(),a.len,b.dat.get(),b.len,out.get());
+        return BigInt(std::move(out),olen).shrink();
     }
-    BigInt&operator+=(const BigInt&that){
-        if(!dat){return *this=*this+that;}
-        if(!that.dat){
-            umax ext=signExtend(that.len);
-            dat=allocData(dat,len+1);
-            dat->data[len]=add(dat->data,len,&ext,1,dat->data);
-            len++;
-        }else{
-            size_t olen=(len>that.len?len:that.len)+1;
-            dat=allocData(dat,olen);
-            dat->data[olen-1]=add(dat->data,len,that.dat->data,that.len,dat->data);
-            len=olen;
-        }
-        return shrink();
-    }
-    BigInt operator-()const{return (~*this).inc_dec(true,false);}
-    BigInt& negate(){return ++invert();}
-    friend BigInt operator-(const BigInt&a,const BigInt&b){return a+-b;}
-    BigInt&operator-=(const BigInt&that){(*this)+=-that;return *this;}
 private:
     static void multiply(const umax*adat,size_t alen,const umax*bdat,size_t blen,umax*out);
-    static void multiply(size_t&x,size_t&y);
 public:
     friend BigInt operator*(const BigInt&a,const BigInt&b){
-        if(!(a.dat||b.dat)){
-            size_t lo=a.len,hi=b.len;
-            multiply(lo,hi);
-            umax low,high;
-            pack(lo,hi,low,high);
-            return BigInt(low,high);
-        }
-        umax aext=signExtend(a.len),bext=signExtend(b.len);
-        size_t alen=a.dat?a.len:1,blen=b.dat?b.len:1,olen=alen+blen;
-        umax*adat=a.dat?a.dat->data:&aext;
-        umax*bdat=b.dat?b.dat->data:&bext;
-        Data*out=allocData(olen);
-        multiply(adat,alen,bdat,blen,out->data);
-        return BigInt(out,olen);
+        size_t olen=a.len+b.len;
+        auto out=alloc(olen);
+        multiply(a.dat.get(),a.len,b.dat.get(),b.len,out.get());
+        return BigInt(std::move(out),olen).shrink();
     }
-    BigInt operator*=(const BigInt&that){(*this)=(*this)*that;return (*this);}
-    BigInt operator/=(const BigInt&that){(*this)=(*this)/that;return (*this);}
     friend BigInt operator""_BigInt(const char*raw){
         BigInt cooked=0;
         if(raw[0]=='0'){
@@ -377,20 +220,20 @@ public:
         }
         return cooked;
     }
-    static void divmod(const BigInt&a,const BigInt&b,BigInt&q,BigInt&r){
-        if(b<0){divmod(a,-b,q,r);q.negate();return;}
+    static void divmod(BigInt&a,const BigInt&b,BigInt&r){
+        if(b<0){divmod(a,-b,r);a.negate();return;}
         if(a<0){
-            divmod(-a,b,q,r);
-            if(r.sign()){q=-q-1;r=b-r;}else{q.negate();}
+            a.negate();
+            divmod(a,b,r);
+            if(r.sign()){++a;r=b-r;}a.negate();
             return;
         }
-        q=r=0;
-        for(size_t i=(a.dat?a.len:1)*digits<umax>;i--;){
-            r=r<<1|((a>>i)&1);
-            q<<=1;
-            if(r>=b){r-=b;q|=BigInt(1);}
+        r=0;
+        for(BigInt bit=BigInt(1)<<(a.len*bits);bit;bit>>=1){
+            r<<=1;
+            if(a&bit){r|=BigInt(1);};
+            if(r>=b){r-=b;a|=bit;}else{a&=~bit;}
         }
     }
-    friend BigInt operator/(const BigInt&a,const BigInt&b){BigInt q,r;divmod(a,b,q,r);return q;}
-    friend BigInt operator%(const BigInt&a,const BigInt&b){BigInt q,r;divmod(a,b,q,r);return r;}
+    //static BigInt pow(const BigInt&base,const BigInt&exp){}
 };

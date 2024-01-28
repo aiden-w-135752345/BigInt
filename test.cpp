@@ -10,7 +10,8 @@ void printBig(BigInt big){
     printf("\n");
 }
 int main(){
-    BigInt i=BigInt(1)<<64;
-    printf("\n");
-    printBig(i);
+    BigInt p=1;
+    for(int i=1;i<100;i++){p*=BigInt(i);}
+    for(int i=1;i<100;i++){p/=BigInt(i);}
+    printBig(p);
 }
