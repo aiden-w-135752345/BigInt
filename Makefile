@@ -1,19 +1,13 @@
-all: BigInt.o test.out asan.out
-	size -t BigInt.o test.o
+all: BigInt.a test.out
+	size -t BigInt.a test.out
 
-CFLAGS = -Wall -Wextra -Werror -Wpedantic -std=c++11 -fdiagnostics-color
+CFLAGS = -Wall -Wextra -Werror -Wpedantic -fdiagnostics-color -std=c++11
 
-BigInt.o: BigInt.cpp BigInt.hpp
-	g++ $(CFLAGS) -Os -s -c BigInt.cpp -o $@
+BigInt.a: build/impl.o
+	ar rcu $@ $<
 
-test.o: BigInt.cpp BigInt.hpp
-	g++ $(CFLAGS) -Os -g -c BigInt.cpp -o $@
+build/impl.o: src/impl.cpp include/BigInt.hpp
+	g++ $(CFLAGS) -o $@ -Os -s -c $<
 
-asan.o: BigInt.cpp BigInt.hpp
-	g++ $(CFLAGS) -Os -g -fsanitize=address -c BigInt.cpp -o $@
-
-test.out: test.cpp test.o BigInt.hpp
-	g++ $(CFLAGS) -Os -g test.cpp test.o -o $@
-
-asan.out: test.cpp asan.o BigInt.hpp
-	g++ $(CFLAGS) -Os -g -fsanitize=address test.cpp asan.o -o $@
+test.out: test.cpp src/impl.cpp include/BigInt.hpp
+	g++ $(CFLAGS) -o $@ -Os -g -fsanitize=address test.cpp src/impl.cpp

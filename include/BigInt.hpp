@@ -247,13 +247,13 @@ public:
         }
         return num;
     }
-    std::string toString(short radix)const{
+    std::string toString(short radix=10)const{
         BigInt num=*this,bigRadix=BigInt(radix);
         std::string str;
         if(sign()<0){num.negate();}
-        do{str.push_back("0123456789abcdefghijklmnopqrstuvwxyz"[divmod(num,bigRadix).dat.get()[0]]);}while(num);
+        do{str.push_back("0123456789abcdefghijklmnopqrstuvwxyz"[divmod(num,bigRadix).getData()[0]]);}while(num);
         if(sign()<0){str.push_back('-');}
-        for(size_t i=0,len=str.size();2*i<len;i++){char tmp=str[i];str[i]=str[len-i];str[len-i]=tmp;}
+        for(size_t i=0,len=str.size();2*i<len;i++){char tmp=str[i];str[i]=str[len-i-1];str[len-i-1]=tmp;}
         return str;
     }
 };
