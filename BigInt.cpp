@@ -4,7 +4,6 @@
 #include <cmath>
 #include <utility>
 #include "BigInt.hpp"
-
 void BigInt::bit_and(const umax*adat,size_t alen,const umax*bdat,size_t blen,umax*out){
     size_t minlen=alen>blen?blen:alen,i=0;
     for(;i<minlen;i++){out[i]=adat[i]&bdat[i];}

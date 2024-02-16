@@ -1,19 +1,15 @@
-#include <cstring>
 #include <cstdint>
-#include <cstdio>
+#include <string>
 #include <limits>
-#include <new>
-#include <cmath>
-#include <utility>
 #include <memory>
+class BigInt;
+BigInt operator""_BigInt(const char*);
 class BigInt{
     typedef uintmax_t umax;
     typedef std::make_signed<size_t>::type signed_size_t;
-    static std::shared_ptr<umax> alloc(size_t len){return{new umax[len-1],std::default_delete<umax[]>()};}
+    static std::shared_ptr<umax> alloc(size_t len){return{new umax[len],std::default_delete<umax[]>()};}
     std::shared_ptr<umax> dat;
     size_t len;
-    
-
     constexpr static auto bits = std::numeric_limits<umax>::digits;
     static umax signBit(umax value){return value>>(bits-1);}
     static size_t popcnt(umax value){
@@ -24,18 +20,16 @@ class BigInt{
         return value;
     }
     static size_t ctz(umax value){
-        size_t c=bits;
+        if(!value){return -1;}
+        size_t c=0;
         value&=-value;
-        if(value){c--;}
-        for(size_t i=bits/2;i;i>>=1){
-            if(value&(((umax)-1)/((((umax)1)<<i)+1))){c-=i;}
-        }
-        return 0;
+        for(size_t i=bits/2;i;i>>=1){if(value&~((~(umax)0)/((((umax)1)<<i)+1))){c+=i;}}
+        return c;
     }
-    static size_t log2(umax value){
-        size_t r = 0;
-        for(size_t s=bits/2;s;s>>=1){if(value&(((((umax)1)<<s)-1)<<s)){value>>=s;r|=s;}}
-        return r;// floor(log2(value))
+    static size_t clz(umax value){
+        size_t r=bits;
+        for(size_t s=bits/2;s;s>>=1){if(value&((~(umax)0)<<(s-1))){value>>=s;r-=s;}}
+        return r;
     }
     BigInt&shrink(){
         while(len>1&&!(dat.get()[len-1]+signBit(dat.get()[len-2]))){len--;}
@@ -48,8 +42,8 @@ class BigInt{
     }
     BigInt(std::shared_ptr<umax>&&data,size_t length):dat(data),len(length){}
 public:
-    BigInt(signed_size_t value=0):dat(alloc(1)),len(1){dat.get()[0]=value;}
-    int sign()const{return signBit(dat.get()[len-1])?-1:1;}
+    BigInt(intmax_t value=0):dat(alloc(1)),len(1){dat.get()[0]=value;}
+    short sign()const{return signBit(dat.get()[len-1])?-1:(len>1||dat.get()[0])?1:0;}
     size_t popcnt(){
         size_t total=0;
         for(size_t i=0;i<len;i++){total+=popcnt(dat.get()[i]);}
@@ -58,8 +52,11 @@ public:
     }
     size_t ctz(){
         size_t i=0;
-        while(dat.get()[i]){i++;}
-        return i*bits+ctz(dat.get()[i]);
+        while(i<len&&!dat.get()[i]){i++;}
+        return i<len?i*bits+ctz(dat.get()[i]):-1;
+    }
+    size_t log2(){
+        return len*bits-clz(dat.get()[len-1])-1;
     }
     explicit operator bool() const{return sign();};
     friend bool operator< (const BigInt&a,const BigInt&b){return (a-b).sign()<0;}
@@ -71,9 +68,6 @@ public:
     
     BigInt operator-()const{return (~*this).inc_dec(true,false);}
     friend BigInt operator-(const BigInt&a,const BigInt&b){return a+-b;}
-    friend BigInt operator/(const BigInt&a,const BigInt&b){BigInt q=a,r;divmod(q,b,r);return q;}
-    friend BigInt operator%(const BigInt&a,const BigInt&b){BigInt q=a,r;divmod(q,b,r);return r;}
-    
     BigInt&invert(){return*this=~*this;}
     BigInt&operator++(){return *this=inc_dec(true,false);}
     BigInt operator++(int){BigInt old=*this;operator++();return old;}
@@ -188,49 +182,80 @@ public:
         multiply(a.dat.get(),a.len,b.dat.get(),b.len,out.get());
         return BigInt(std::move(out),olen).shrink();
     }
-    friend BigInt operator""_BigInt(const char*raw){
-        BigInt cooked=0;
-        if(raw[0]=='0'){
-            if(raw[1]=='x'||raw[1]=='X'){
-                for(int i=2;raw[i];i++){
-                    cooked<<=4;
-                    cooked|=BigInt(raw[i]-
-                                   ('a'<=raw[i]&&raw[i]<='f')?'a':
-                                   ('A'<=raw[i]&&raw[i]<='F')?'A':'0');
-                }
-            }else if(raw[1]=='b'||raw[1]=='B'){
-                for(int i=2;raw[i];i++){
-                    cooked<<=1;
-                    cooked|=BigInt(raw[i]-'0');
-                }
-            }else{
-                for(int i=1;raw[i];i++){
-                    cooked<<=3;
-                    cooked|=BigInt(raw[i]-'0');
-                }
-            }
-        }else{
-            for(int i=0;raw[i];i++){
-                cooked*=BigInt(10);
-                cooked+=BigInt(raw[i]-'0');
-            }
-        }
-        return cooked;
-    }
-    static void divmod(BigInt&a,const BigInt&b,BigInt&r){
-        if(b<0){divmod(a,-b,r);a.negate();return;}
-        if(a<0){
+    friend BigInt operator/(BigInt a,const BigInt&b){divmod(a,b);return a;}
+    friend BigInt operator%(BigInt a,const BigInt&b){return divmod(a,b);}
+    static BigInt divmod(BigInt&a,const BigInt&b){
+        if(b.sign()<0){BigInt r=divmod(a,-b);a.negate();return r;}
+        if(a.sign()<0){
             a.negate();
-            divmod(a,b,r);
-            if(r.sign()){++a;r=b-r;}a.negate();
-            return;
+            BigInt r=divmod(a,b);
+            if(r){++a;r=b-r;}
+            a.negate();
+            return r;
         }
-        r=0;
-        for(BigInt bit=BigInt(1)<<(a.len*bits);bit;bit>>=1){
+        BigInt r=0;
+        for(BigInt bit=1_BigInt<<(a.len*bits);bit;bit>>=1){
             r<<=1;
-            if(a&bit){r|=BigInt(1);};
+            if(a&bit){r|=1_BigInt;};
             if(r>=b){r-=b;a|=bit;}else{a&=~bit;}
         }
+        return r;
     }
-    //static BigInt pow(const BigInt&base,const BigInt&exp){}
+    static BigInt pow(BigInt base,BigInt exponent){
+        BigInt ret=1;
+        while(exponent){
+            if(exponent&1_BigInt){ret*=base;}
+            exponent>>=1;base*=base;
+        }
+        return ret;
+    }
+    const umax*getData(){return dat.get();}
+    template<class T>
+    static BigInt parse(const T*str,size_t len){
+        BigInt num=0;
+        if(str[0]=='0'){
+            if(len==1){return num;}
+            if(str[1]=='x'||str[1]=='X'){
+                for(size_t i=2;i<len;i++){
+                    num<<=4;
+                    if('0'<=str[i]&&str[i]<='9'){
+                        num|=BigInt(str[i]-'0');
+                    }else if('a'<=str[i]&&str[i]<='f'){
+                        num|=BigInt(10+str[i]-'a');
+                    }else if('A'<=str[i]&&str[i]<='F'){
+                        num|=BigInt(10+str[i]-'A');
+                    }else{throw std::invalid_argument("Bad hexadecimal BigInt");}
+                }
+                return num;
+            }else if(str[1]=='b'||str[1]=='B'){
+                for(size_t i=2;i<len;i++){
+                    num<<=1;
+                    if(str[i]=='1'){num|=BigInt(1);}else if(str[i]!='0'){throw std::invalid_argument("Bad binary BigInt");}
+                }
+                return num;
+            }else if(str[1]=='o'||str[1]=='O'){
+                for(size_t i=2;i<len;i++){
+                    num<<=3;
+                    if('0'<=str[i]&&str[i]<'8'){num|=BigInt(str[i]-'0');}else{throw std::invalid_argument("Bad octal BigInt");}
+                }
+                return num;
+            }
+        }
+        for(size_t i=0;i<len;i++){
+            num*=BigInt(10);
+            if('0'<=str[i]&&str[i]<='9'){num+=BigInt(str[i]-'0');}else{throw std::invalid_argument("Bad decimal BigInt");}
+        }
+        return num;
+    }
+    std::string toString(short radix)const{
+        BigInt num=*this,bigRadix=BigInt(radix);
+        std::string str;
+        if(sign()<0){num.negate();}
+        do{str.push_back("0123456789abcdefghijklmnopqrstuvwxyz"[divmod(num,bigRadix).dat.get()[0]]);}while(num);
+        if(sign()<0){str.push_back('-');}
+        for(size_t i=0,len=str.size();2*i<len;i++){char tmp=str[i];str[i]=str[len-i];str[len-i]=tmp;}
+        return str;
+    }
 };
+#include <cstring>
+inline BigInt operator""_BigInt(const char*str){return BigInt::parse(str,std::strlen(str));}

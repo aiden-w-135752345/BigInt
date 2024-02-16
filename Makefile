@@ -1,7 +1,7 @@
 all: BigInt.o test.out asan.out
 	size -t BigInt.o test.o
 
-CFLAGS = -Wall -Wextra -Werror -Wpedantic -std=c++11
+CFLAGS = -Wall -Wextra -Werror -Wpedantic -std=c++11 -fdiagnostics-color
 
 BigInt.o: BigInt.cpp BigInt.hpp
 	g++ $(CFLAGS) -Os -s -c BigInt.cpp -o $@
